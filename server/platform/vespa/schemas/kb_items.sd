@@ -1,0 +1,1233 @@
+schema kb_items {
+
+
+  struct chunk_meta {
+    field chunk_index type int {}
+    field page_numbers type array<int> {}
+    field block_labels type array<string> {}
+    field bbox_l type double {}
+    field bbox_t type double {}
+    field bbox_r type double {}
+    field bbox_b type double {}
+    field bboxes_json type string {}
+    field width type int {}
+    field height type int {}
+    field headings type array<string> {}
+  }
+
+  document kb_items {
+
+    field docId type string {
+      indexing: attribute | summary
+      # Unique document identifier in Vespa
+    }
+    
+    field clId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      # Knowledge base ID for folder-level queries
+    }
+    
+    field itemId type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      # Database item ID linking to kb_items table
+    }
+    
+    field pageTitle type string {
+      indexing: summary
+    }
+
+    field clFd type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      # Parent folder ID for hierarchical queries (clfd-xxx)
+    }
+    # knowledge-base
+    field app type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+    }
+
+    field fileName type string {
+      indexing: attribute | summary | index
+      attribute: fast-search
+      index { enable-bm25 }
+    }
+
+    field entity type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      match: exact
+      # Entity type: file or folder
+    }
+
+    field description type string {
+      indexing: index | summary | attribute
+      index { enable-bm25 }
+    }
+    
+    field documentOutline type string {
+      indexing: summary
+    }
+    
+    field storagePath type string {
+      indexing: attribute | summary
+    }
+    
+    field toc_chunks type array<string> {
+      indexing: index | summary
+      index { enable-bm25 }
+    }
+    
+    field chunks type array<string> {
+      indexing: index | summary
+      index { enable-bm25 }
+    }
+
+    field image_chunks type array<string> {
+      indexing: index | summary
+      index { enable-bm25 }
+    }
+
+
+    field chunks_pos type array<long> {
+      indexing: attribute | summary
+    }
+
+    field image_chunks_pos type array<long> {
+      indexing: attribute | summary
+    }
+
+
+    field chunks_map type array<chunk_meta> {
+      indexing: summary
+      struct-field chunk_index { indexing: attribute | summary }
+      struct-field bbox_l { indexing: attribute | summary }
+      struct-field bbox_t { indexing: attribute | summary }
+      struct-field bbox_r { indexing: attribute | summary }
+      struct-field bbox_b { indexing: attribute | summary }
+      struct-field bboxes_json { indexing: summary }
+      struct-field width { indexing: attribute | summary }
+      struct-field height { indexing: attribute | summary }
+    }
+
+    field image_chunks_map type array<chunk_meta> {
+      indexing: summary
+      struct-field chunk_index { indexing: attribute | summary }
+      # Primitive fields can be attributes
+      struct-field bbox_l { indexing: attribute | summary }
+      struct-field bbox_t { indexing: attribute | summary }
+      struct-field bbox_r { indexing: attribute | summary }
+      struct-field bbox_b { indexing: attribute | summary }
+      struct-field bboxes_json { indexing: summary }
+      struct-field width { indexing: attribute | summary }
+      struct-field height { indexing: attribute | summary }
+      # Array fields are stored in summary only (not as attributes)
+    }
+    
+    field metadata type string {
+      indexing: attribute | summary
+    }
+    
+    field createdBy type string {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field duration type long {
+      indexing: attribute | summary
+    }
+
+    field mimeType type string {
+      indexing: attribute | summary
+    }
+    
+    field fileSize type long {
+      indexing: attribute | summary
+    }
+
+    field createdAt type long {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field updatedAt type long {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    # Extracted metadata fields (added 2026-05-17 for ID-based and entity retrieval)
+    field document_id type string {
+      indexing: attribute | summary
+      attribute: fast-search
+      rank: filter
+    }
+
+    field referenced_ids type array<string> {
+      indexing: attribute | summary | index
+      index { enable-bm25 }
+      attribute: fast-search
+      match: text
+    }
+
+    # Stored as YYYYMMDD int (e.g. 20251201) so range queries (>=, <=)
+    # work — Vespa's YQL range operators are numeric-only.
+    field document_date type long {
+      indexing: attribute | summary
+      attribute: fast-search
+    }
+
+    field pan_ids type array<string> {
+      indexing: attribute | summary
+      attribute: fast-search
+      rank: filter
+    }
+
+    field entities_involved type array<string> {
+      indexing: index | summary | attribute
+      index { enable-bm25 }
+      attribute: fast-search
+    }
+
+    # LLM-generated per-document summary (title/type/date/entities/topics/regulations/summary).
+    field ai_summary type string {
+      indexing: index | summary | attribute
+      index { enable-bm25 }
+      match: text
+    }
+  }
+
+  # Vector embeddings
+  field chunk_embeddings type tensor<bfloat16>(p{}, v[DIMS]) {
+    indexing: input chunks | embed | attribute | index
+    attribute { distance-metric: angular }
+  }
+
+  field image_chunk_embeddings type tensor<bfloat16>(p{}, v[DIMS]) {
+    indexing: input image_chunks | embed | attribute | index
+    attribute { distance-metric: angular }
+  }
+
+  # Fuzzy fileName
+  field fileName_fuzzy type string {
+    indexing: input fileName | index
+    index { enable-bm25 }
+    match { gram gram-size: 3 }
+  }
+
+  fieldset default      { fields:  description, toc_chunks, chunks, image_chunks, fileName, entity, createdBy, clFd, referenced_ids, entities_involved, ai_summary }
+  fieldset autocomplete { fields:  fileName }
+  fieldset search       { fields:  description, toc_chunks, chunks, image_chunks, fileName, entity, clFd, ai_summary }
+
+  rank-profile initial {
+    # Inputs for the query vector and alpha for hybrid search
+    inputs {
+      query(e) tensor<bfloat16>(v[DIMS])  # Query embedding
+      query(alpha) double  # Alpha parameter for hybrid weight
+      query(chunk_limit) double: 3
+      query(summary_chunks) double: 5
+      query(recency_decay_rate) double
+    }
+
+    constants {
+      THREE_MONTHS_IN_SECONDS: 7890000
+      ONE_YEAR_IN_SECONDS: 31536000
+      MAX_DOC_DECAY: 0.5
+    }
+
+    # custom normalize function
+    function scale(val) {
+      expression: 2*atan(val/4)/(3.14159)
+    }
+
+    function document_age() {
+      # Default document age assuming to 3 months when no updatedAt timestamp is present
+      expression: max(if(isNan(attribute(updatedAt)) == 1, THREE_MONTHS_IN_SECONDS, now() - (attribute(updatedAt) / 1000)) / ONE_YEAR_IN_SECONDS, 0)
+    }
+
+    # Document score decays min to 0.5
+    function doc_recency() {
+        expression: max(1 / (1 + query(recency_decay_rate) * sqrt(document_age)), MAX_DOC_DECAY)
+    }
+
+    function vector_score() {
+      expression: closeness(field, chunk_embeddings) + closeness(field, image_chunk_embeddings)
+    }
+
+    function combined_bm25() {
+      expression: bm25(fileName) + bm25(chunks) + bm25(image_chunks) + bm25(description)
+    }
+
+    function matchedFieldCount() {
+      expression {
+        # The `matches` returns 1 if the field contains a match, otherwise 0
+        matches(fileName) + matches(chunks) + matches(image_chunks) + matches(description)
+      }
+    }
+
+    function combined_nativeRank() {
+      expression: (nativeRank(fileName) + nativeRank(chunks) + nativeRank(image_chunks) + nativeRank(description)) / if(matchedFieldCount == 0, 1, matchedFieldCount)
+    }
+
+    function chunk_scores() {
+      expression: elementwise(bm25(chunks), x, double)
+    }
+
+    function image_chunk_scores() {
+      expression: elementwise(bm25(image_chunks), x, double)
+    }
+
+    function best_chunks() {
+      expression: top(query(chunk_limit), chunk_scores)
+    }
+
+    function top_k_chunks_score() {
+      expression: reduce(best_chunks, sum)
+    }
+
+    function best_summary_chunks() {
+      expression: top(query(summary_chunks), chunk_scores)
+    }
+
+    summary-features {
+      best_summary_chunks
+    }
+  }
+
+  rank-profile default_native inherits initial {
+
+    constants {
+      W_FN:    0.45
+      W_CHUNKS: 0.20
+      W_TOC:    0.10
+      W_IMG:    0.05
+      W_DESC:   0.10
+
+      PROX_FN_W:  0.40
+      PROX_CH_W:  0.60
+      PROX_TOC_W: 0.20
+      PROX_IMG_W: 0.05
+    }
+
+    rank-properties {
+      bm25(fileName).k1: 1.2
+      bm25(fileName).b: 0.0
+      bm25(chunks).k1: 0.9
+      bm25(chunks).b: 0.75
+      bm25(image_chunks).k1: 0.9
+      bm25(image_chunks).b: 0.3
+      bm25(toc_chunks).k1: 0.9
+      bm25(toc_chunks).b: 0.3
+      bm25(description).k1: 1.0
+      bm25(description).b: 0.5
+      elementSimilarity(chunks).output.default:       "max((0.70*p + 0.20*o + 0.07*q + 0.03*f) * w)"
+      elementSimilarity(toc_chunks).output.default:   "max((0.70*p + 0.20*o + 0.07*q + 0.03*f) * w)"
+      elementSimilarity(image_chunks).output.default: "max((0.70*p + 0.20*o + 0.07*q + 0.03*f) * w)"
+    }
+
+    function weighted_bm25() {
+      expression {
+        W_FN     * scale(bm25(fileName)) +
+        W_CHUNKS * scale(bm25(chunks)) +
+        W_TOC    * scale(bm25(toc_chunks)) +
+        W_IMG    * scale(bm25(image_chunks)) +
+        W_DESC   * scale(bm25(description))
+      }
+    }
+
+    function filename_match_score() {
+      expression {
+        if(matches(fileName) == 0, 0.0,
+          0.40 * textSimilarity(fileName).proximity +
+          0.30 * textSimilarity(fileName).queryCoverage +
+          0.20 * textSimilarity(fileName).order +
+          0.10 * textSimilarity(fileName).fieldCoverage)
+      }
+    }
+
+    function chunk_proximity_score() {
+      expression: if(matches(chunks) == 0, 0.0, elementSimilarity(chunks))
+    }
+
+    function toc_proximity_score() {
+      expression: if(matches(toc_chunks) == 0, 0.0, elementSimilarity(toc_chunks))
+    }
+
+    function image_chunk_proximity_score() {
+      expression: if(matches(image_chunks) == 0, 0.0, elementSimilarity(image_chunks))
+    }
+
+    function lexical_score() {
+      # Title-boost: 5 * nativeRank(fileName) + 0.2 * nativeRank(chunks).
+      # Swapped 2026-05-18 — matches title_boosted_hybrid math so the agent
+      # (which calls SearchModes.NativeRank → default_native) automatically
+      # uses title-boost without a code change. The legacy weighted_bm25 /
+      # filename_match_score / chunk_proximity_score / *_proximity_score
+      # helpers are still defined above and exposed in match-features for
+      # diagnostics, but no longer drive the ranking score.
+      expression {
+        5 * nativeRank(fileName) + 0.2 * nativeRank(chunks)
+      }
+    }
+
+    first-phase {
+      expression: (query(alpha) * vector_score) + ((1 - query(alpha)) * lexical_score)
+    }
+
+    global-phase {
+      expression {
+        (
+          (query(alpha) * vector_score) +
+          ((1 - query(alpha)) * lexical_score)
+        )
+      }
+      rerank-count: 1000
+    }
+
+    match-features {
+      vector_score
+      weighted_bm25
+      filename_match_score
+      chunk_proximity_score
+      toc_proximity_score
+      image_chunk_proximity_score
+      lexical_score
+      bm25(fileName)
+      bm25(chunks)
+      bm25(toc_chunks)
+      bm25(description)
+      bm25(image_chunks)
+      textSimilarity(fileName).proximity
+      textSimilarity(fileName).queryCoverage
+      elementSimilarity(chunks)
+      elementSimilarity(toc_chunks)
+      elementSimilarity(image_chunks)
+      nativeRank(fileName)
+      nativeRank(chunks)
+      doc_recency
+      matchedFieldCount
+      chunk_scores
+      image_chunk_scores
+    }
+  }
+
+  rank-profile default_native_dynamic_chunks inherits initial {
+
+    constants {
+      W_FN: 0.10
+      W_TOPK_CHUNKS: 0.40
+      W_AI_SUMMARY: 0.40
+    }
+
+    rank-properties {
+      bm25(fileName).k1: 1.2
+      bm25(fileName).b: 0.0
+      bm25(chunks).k1: 0.9
+      bm25(chunks).b: 0.75
+      bm25(ai_summary).k1: 1.0
+      bm25(ai_summary).b: 0.5
+      elementSimilarity(chunks).output.default: "max((0.70*p + 0.20*o + 0.07*q + 0.03*f) * w)"
+    }
+
+    function lexical_score() {
+      expression {
+        W_FN * scale(bm25(fileName)) +
+        W_TOPK_CHUNKS * scale(top_k_chunks_score) +
+        W_AI_SUMMARY * scale(bm25(ai_summary))
+      }
+    }
+
+    first-phase {
+      expression: (query(alpha) * vector_score) + ((1 - query(alpha)) * lexical_score)
+    }
+
+    global-phase {
+      expression {
+        (
+          (query(alpha) * vector_score) +
+          ((1 - query(alpha)) * lexical_score)
+        ) * doc_recency
+      }
+      rerank-count: 1000
+    }
+
+    match-features {
+      vector_score
+      lexical_score
+      bm25(fileName)
+      bm25(ai_summary)
+      top_k_chunks_score
+      chunk_scores
+      doc_recency
+    }
+  }
+
+
+  # Variant v6 — v5 with FN_W bumped 3.0 -> 4.0: nudges filename strength up to
+  # recover the master_circ pattern (which needs strong filename to pick the
+  # labeled copy over its duplicate) while keeping v5's raised chunk weight.
+  rank-profile default_native_dynamic_chunks_file_v6_linear_hi4 inherits initial {
+
+    constants {
+      FN_W: 4.0
+      W_TOPK_CHUNKS: 0.60
+      W_AI_SUMMARY: 0.40
+    }
+
+    rank-properties {
+      bm25(fileName).k1: 1.2
+      bm25(fileName).b: 0.0
+      bm25(chunks).k1: 0.9
+      bm25(chunks).b: 0.75
+      bm25(ai_summary).k1: 1.0
+      bm25(ai_summary).b: 0.5
+      elementSimilarity(chunks).output.default: "max((0.70*p + 0.20*o + 0.07*q + 0.03*f) * w)"
+    }
+
+    function lexical_score() {
+      expression {
+        FN_W * nativeRank(fileName) +
+        W_TOPK_CHUNKS * scale(top_k_chunks_score) +
+        W_AI_SUMMARY * scale(bm25(ai_summary))
+      }
+    }
+
+    first-phase {
+      expression: (query(alpha) * vector_score) + ((1 - query(alpha)) * lexical_score)
+    }
+
+    global-phase {
+      expression {
+        (
+          (query(alpha) * vector_score) +
+          ((1 - query(alpha)) * lexical_score)
+        ) * doc_recency
+      }
+      rerank-count: 1000
+    }
+
+    match-features {
+      vector_score
+      lexical_score
+      nativeRank(fileName)
+      bm25(ai_summary)
+      top_k_chunks_score
+      chunk_scores
+      doc_recency
+    }
+  }
+
+  # TUNABLE twin of the file-aware family (v2/v6). The 3 weights are QUERY inputs
+  # (query(fn_w)/query(w_topk)/query(w_ai)), so the eval harness can SWEEP them
+  # without a Vespa redeploy — pass input.query(fn_w)=... etc. per request.
+  # Defaults below = v6. (v2 ≈ fn_w 5.0, w_topk 0.40; v6 = fn_w 4.0, w_topk 0.60.)
+  rank-profile default_native_dynamic_chunks_file_tunable inherits initial {
+
+    inputs {
+      query(fn_w)   double: 4.0
+      query(w_topk) double: 0.6
+      query(w_ai)   double: 0.4
+    }
+
+    rank-properties {
+      bm25(fileName).k1: 1.2
+      bm25(fileName).b: 0.0
+      bm25(chunks).k1: 0.9
+      bm25(chunks).b: 0.75
+      bm25(ai_summary).k1: 1.0
+      bm25(ai_summary).b: 0.5
+      elementSimilarity(chunks).output.default: "max((0.70*p + 0.20*o + 0.07*q + 0.03*f) * w)"
+    }
+
+    function lexical_score() {
+      expression {
+        query(fn_w) * nativeRank(fileName) +
+        query(w_topk) * scale(top_k_chunks_score) +
+        query(w_ai) * scale(bm25(ai_summary))
+      }
+    }
+
+    first-phase {
+      expression: (query(alpha) * vector_score) + ((1 - query(alpha)) * lexical_score)
+    }
+
+    global-phase {
+      expression {
+        (
+          (query(alpha) * vector_score) +
+          ((1 - query(alpha)) * lexical_score)
+        ) * doc_recency
+      }
+      rerank-count: 1000
+    }
+
+    match-features {
+      vector_score
+      lexical_score
+      nativeRank(fileName)
+      bm25(ai_summary)
+      top_k_chunks_score
+      chunk_scores
+      doc_recency
+    }
+  }
+
+  # WINNER — recall-optimized file-aware profile. Weights fn:topk:ai = 4.0:0.4:0.2
+  # were found by offline learning-to-rank (gradient-trained features + grid search
+  # directly maximizing recall@25-30, 5-fold CV-stable). On the v4 eval (alpha 0,
+  # rewrites on) it reaches ~97% hit@30 — beating default_native (84%) and v6 — and
+  # also beats v6 on MRR. Recency kept (prod); turn OFF for eval via
+  # query(recency_decay_rate)=0. See scripts/eval/RANK_PROFILE_VARIANTS.md.
+  rank-profile default_native_dynamic_chunks_file inherits initial {
+
+    constants {
+      FN_W: 4.0
+      W_TOPK_CHUNKS: 0.4
+      W_AI_SUMMARY: 0.2
+    }
+
+    rank-properties {
+      bm25(fileName).k1: 1.2
+      bm25(fileName).b: 0.0
+      bm25(chunks).k1: 0.9
+      bm25(chunks).b: 0.75
+      bm25(ai_summary).k1: 1.0
+      bm25(ai_summary).b: 0.5
+      elementSimilarity(chunks).output.default: "max((0.70*p + 0.20*o + 0.07*q + 0.03*f) * w)"
+    }
+
+    function lexical_score() {
+      expression {
+        FN_W * nativeRank(fileName) +
+        W_TOPK_CHUNKS * scale(top_k_chunks_score) +
+        W_AI_SUMMARY * scale(bm25(ai_summary))
+      }
+    }
+
+    first-phase {
+      expression: (query(alpha) * vector_score) + ((1 - query(alpha)) * lexical_score)
+    }
+
+    global-phase {
+      expression {
+        (
+          (query(alpha) * vector_score) +
+          ((1 - query(alpha)) * lexical_score)
+        ) * doc_recency
+      }
+      rerank-count: 1000
+    }
+
+    match-features {
+      vector_score
+      lexical_score
+      nativeRank(fileName)
+      bm25(ai_summary)
+      top_k_chunks_score
+      chunk_scores
+      doc_recency
+    }
+  }
+
+
+  rank-profile chunk_tf_prox_coverage inherits initial {
+
+    constants {
+      W_OCCURRENCE: 0.50
+      W_NATIVE_PROX: 1.0
+      # ai_summary = per-doc SUBJECT signal (NOT filename — filename is v6's job).
+      # Down-ranks boilerplate-heavy filings (e.g. prospectus litigation-disclosure
+      # tables) whose doc summary is about a different subject, while proximity on
+      # the chunk body stays the driver.
+      W_AI_SUMMARY: 0.0
+      # Raised 0.20 -> 0.85: demand the query terms co-occur near-completely in the
+      # chunk, not just brush past, before the proximity score counts.
+      MIN_QUERY_COVERAGE_FACTOR: 0.10
+    }
+
+    rank-properties {
+      bm25(ai_summary).k1: 1.0
+      bm25(ai_summary).b: 0.5
+      # proximity + query-coverage + field-coverage, so matched terms must FILL the
+      # chunk rather than appear sparsely in a long passage.
+      elementSimilarity(chunks).output.default: "max((0.60*p + 0.25*q + 0.15*f) * w)"
+      nativeFieldMatch(chunks).firstOccurrenceImportance: 1.0
+    }
+
+    function field_occurrence_score() {
+      expression: nativeFieldMatch(chunks)
+    }
+
+    function field_native_proximity_score() {
+      expression: nativeProximity(chunks)
+    }
+
+    function document_query_coverage_score() {
+      expression: elementCompleteness(chunks).queryCompleteness
+    }
+
+    function best_chunk_score() {
+      expression: if(matches(chunks) == 0, 0.0, elementSimilarity(chunks))
+    }
+
+    function ai_summary_score() {
+      expression: scale(bm25(ai_summary))
+    }
+
+    function base_document_score() {
+      expression {
+        W_OCCURRENCE * field_occurrence_score +
+        W_NATIVE_PROX * field_native_proximity_score
+      }
+    }
+
+    function chunk_proximity_score() {
+      expression: base_document_score * max(document_query_coverage_score, MIN_QUERY_COVERAGE_FACTOR)
+    }
+
+    function lexical_score() {
+      expression: chunk_proximity_score + W_AI_SUMMARY * ai_summary_score
+    }
+
+    first-phase {
+      expression: (query(alpha) * vector_score) + ((1 - query(alpha)) * lexical_score)
+    }
+
+    match-features {
+      vector_score
+      lexical_score
+      chunk_proximity_score
+      ai_summary_score
+      base_document_score
+      field_occurrence_score
+      field_native_proximity_score
+      document_query_coverage_score
+      best_chunk_score
+      bm25(ai_summary)
+      nativeFieldMatch(chunks)
+      nativeProximity(chunks)
+      elementCompleteness(chunks).queryCompleteness
+      elementSimilarity(chunks)
+      matches(chunks)
+      chunk_scores
+    }
+  }
+
+  # Metadata-aware variant: same as default_native + boost for matches in
+  # extracted metadata fields (referenced_ids, entities_involved).
+  rank-profile default_native_with_metadata inherits default_native {
+    constants {
+      META_REF_W: 0.5
+      META_ENT_W: 0.5
+    }
+
+    function metadata_score() {
+      expression {
+        META_REF_W * bm25(referenced_ids) + META_ENT_W * bm25(entities_involved)
+      }
+    }
+
+    first-phase {
+      expression: (query(alpha) * vector_score) + ((1 - query(alpha)) * (lexical_score + metadata_score))
+    }
+
+    global-phase {
+      expression {
+        (
+          (query(alpha) * vector_score) +
+          ((1 - query(alpha)) * (lexical_score + metadata_score))
+        ) * doc_recency
+      }
+      rerank-count: 1000
+    }
+
+    match-features {
+      vector_score
+      lexical_score
+      metadata_score
+      weighted_bm25
+      filename_match_score
+      chunk_proximity_score
+      bm25(referenced_ids)
+      bm25(entities_involved)
+      bm25(fileName)
+      bm25(chunks)
+      doc_recency
+      chunk_scores
+    }
+  }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # tunable — every weight is a query-time input so a UI can override per call
+  # without redeploying the schema. Defaults reproduce a sensible hybrid mix.
+  # Inherits `initial` for: vector_score, doc_recency, chunk_scores,
+  # combined_nativeRank, query(e)/query(alpha)/query(recency_decay_rate).
+  # ─────────────────────────────────────────────────────────────────────────
+  rank-profile tunable inherits initial {
+
+    inputs {
+      query(W_CHUNKS_BM25)   double: 1.0
+      query(W_FILENAME_BM25) double: 0.8
+      query(W_DESC_BM25)     double: 0.5
+      query(W_TOC_BM25)      double: 0.4
+      query(W_IMG_BM25)      double: 0.3
+
+      query(PROX_CHUNKS)     double: 0.5
+      query(PROX_FILENAME)   double: 3.0
+
+      query(W_VECTOR)        double: 3.0
+      query(W_RECENCY)       double: 1.0
+
+      # textSimilarity(fileName) sub-feature mix
+      query(W_FN_PROX)       double: 0.40
+      query(W_FN_QCOV)       double: 0.30
+      query(W_FN_ORDER)      double: 0.20
+      query(W_FN_FCOV)       double: 0.10
+    }
+
+    function tunable_lexical() {
+      expression {
+          query(W_CHUNKS_BM25)   * bm25(chunks)
+        + query(W_FILENAME_BM25) * bm25(fileName)
+        + query(W_DESC_BM25)     * bm25(description)
+        + query(W_TOC_BM25)      * bm25(toc_chunks)
+        + query(W_IMG_BM25)      * bm25(image_chunks)
+      }
+    }
+
+    function tunable_filename_textsim() {
+      expression {
+          query(W_FN_PROX)  * textSimilarity(fileName).proximity
+        + query(W_FN_QCOV)  * textSimilarity(fileName).queryCoverage
+        + query(W_FN_ORDER) * textSimilarity(fileName).order
+        + query(W_FN_FCOV)  * textSimilarity(fileName).fieldCoverage
+      }
+    }
+
+    function tunable_proximity() {
+      expression {
+          query(PROX_CHUNKS)   * nativeProximity(chunks)
+        + query(PROX_FILENAME) * tunable_filename_textsim
+      }
+    }
+
+    function tunable_vector() {
+      expression: query(W_VECTOR) * vector_score
+    }
+
+    # Smooth recency: when W_RECENCY=0 → factor=1 (off); =1 → full doc_recency;
+    # =2 → exaggerated. doc_recency itself ranges roughly [0.5, 1.0].
+    function tunable_recency_factor() {
+      expression: 1.0 + query(W_RECENCY) * (doc_recency - 1.0)
+    }
+
+    function tunable_relevance_raw() {
+      expression: tunable_lexical + tunable_proximity + tunable_vector
+    }
+
+    first-phase {
+      expression: tunable_relevance_raw
+    }
+
+    global-phase {
+      expression: tunable_relevance_raw * tunable_recency_factor
+      rerank-count: 1000
+    }
+
+    match-features {
+      bm25(chunks)
+      bm25(fileName)
+      bm25(description)
+      bm25(toc_chunks)
+      bm25(image_chunks)
+      nativeProximity(chunks)
+      textSimilarity(fileName).proximity
+      textSimilarity(fileName).queryCoverage
+      textSimilarity(fileName).order
+      textSimilarity(fileName).fieldCoverage
+      vector_score
+      doc_recency
+      matches(chunks)
+      matches(fileName)
+      matches(description)
+      matches(toc_chunks)
+      matches(image_chunks)
+      chunk_scores
+      tunable_lexical
+      tunable_proximity
+      tunable_vector
+      tunable_filename_textsim
+      tunable_relevance_raw
+      tunable_recency_factor
+      queryTermCount
+    }
+  }
+
+
+  # title_boosted_with_metadata — title_boosted_hybrid + metadata fields
+  # using elementSimilarity for array-of-string identifiers (no Bulletin
+  # domination since each array element is scored independently and we take
+  # the max). filename_score = nativeRank(fileName) * textSim(fileName).
+  # queryCoverage — kills "single common token" filename matches like
+  # "sebi" leaking through.
+  # No global-phase: domain has no temporal bias we want to reward. All
+  # cross-time matches are equal.
+  rank-profile title_boosted_with_metadata inherits initial {
+    constants {
+      W_FN:    5.0
+      W_CH:    0.2
+      W_REF:   3.0
+      W_ENT:   1.0
+    }
+
+    function lexical_score() {
+      expression {
+        W_FN  * nativeRank(fileName)                 +
+        W_CH  * nativeRank(chunks)                   +
+        W_REF * elementSimilarity(referenced_ids)    +
+        W_ENT * elementSimilarity(entities_involved)
+      }
+    }
+
+    first-phase {
+      expression: (query(alpha) * vector_score) + ((1 - query(alpha)) * lexical_score)
+    }
+
+    match-features {
+      vector_score
+      lexical_score
+      nativeRank(fileName)
+      nativeRank(chunks)
+      elementSimilarity(referenced_ids)
+      elementSimilarity(entities_involved)
+      bm25(referenced_ids)
+      bm25(entities_involved)
+      bm25(fileName)
+      bm25(chunks)
+      chunk_scores
+    }
+  }
+
+
+  rank-profile default_random inherits initial {
+    first-phase {
+        expression: random.match
+    }
+    match-features {
+      vector_score
+      combined_nativeRank
+      nativeRank(fileName)
+      nativeRank(chunks)
+      nativeRank(description)
+      chunk_scores
+      image_chunk_scores
+      doc_recency
+    }
+  }
+
+  document-summary default {
+    summary chunks_summary {
+      bolding: on
+      source: chunks
+    }
+    summary image_chunks_summary {
+      bolding: on
+      source: image_chunks
+    }
+    summary toc_chunks_summary {
+      bolding: on
+      source: toc_chunks
+    }
+    summary chunks_pos_summary {
+      source: chunks_pos
+    }
+    summary image_chunks_pos_summary {
+      source: image_chunks_pos
+    }
+    summary chunks_map {
+      source: chunks_map
+    }
+    summary image_chunks_map {
+      source: image_chunks_map
+    }
+  }
+
+  document-summary autocomplete {
+    summary fileName {
+        source: fileName
+    }
+    summary docId {
+        source: docId
+    }
+  }
+
+
+
+  document-summary lean {
+    summary docId {}
+    summary fileName {}
+    summary ai_summary {}
+    summary document_date {}
+    summary document_id {}
+    summary entities_involved {}
+    summary chunks_map {}
+    summary top_chunks_summary {
+      source: chunks
+      select-elements-by: best_summary_chunks
+    }
+  }
+
+  # ---------------------------------------------------------------------------
+  # Chunks-only single-signal sweep profiles (experiment; do not drop).
+  # Each ranks PURELY by one signal over the `chunks` field only — no fileName,
+  # no ai_summary, no vector. Used to find the best parameter for bm25(chunks)
+  # (k1/b) and nativeRank(chunks) (firstOccurrenceImportance). Baseline = k1 0.9/b 0.75.
+  # ---------------------------------------------------------------------------
+  rank-profile chunks_bm25_k1_04_b_075 inherits initial {
+    rank-properties { bm25(chunks).k1: 0.4
+                      bm25(chunks).b: 0.75 }
+    first-phase { expression: bm25(chunks) }
+  }
+  rank-profile chunks_bm25_k1_09_b_075 inherits initial {
+    rank-properties { bm25(chunks).k1: 0.9
+                      bm25(chunks).b: 0.75 }
+    first-phase { expression: bm25(chunks) }
+  }
+  rank-profile chunks_bm25_k1_15_b_075 inherits initial {
+    rank-properties { bm25(chunks).k1: 1.5
+                      bm25(chunks).b: 0.75 }
+    first-phase { expression: bm25(chunks) }
+  }
+  rank-profile chunks_bm25_k1_25_b_075 inherits initial {
+    rank-properties { bm25(chunks).k1: 2.5
+                      bm25(chunks).b: 0.75 }
+    first-phase { expression: bm25(chunks) }
+  }
+  rank-profile chunks_bm25_k1_09_b_00 inherits initial {
+    rank-properties { bm25(chunks).k1: 0.9
+                      bm25(chunks).b: 0.0 }
+    first-phase { expression: bm25(chunks) }
+  }
+  rank-profile chunks_bm25_k1_09_b_04 inherits initial {
+    rank-properties { bm25(chunks).k1: 0.9
+                      bm25(chunks).b: 0.4 }
+    first-phase { expression: bm25(chunks) }
+  }
+  rank-profile chunks_bm25_k1_09_b_10 inherits initial {
+    rank-properties { bm25(chunks).k1: 0.9
+                      bm25(chunks).b: 1.0 }
+    first-phase { expression: bm25(chunks) }
+  }
+  rank-profile chunks_native_foi_00 inherits initial {
+    rank-properties { nativeFieldMatch(chunks).firstOccurrenceImportance: 0.0 }
+    first-phase { expression: nativeRank(chunks) }
+  }
+  rank-profile chunks_native_foi_05 inherits initial {
+    rank-properties { nativeFieldMatch(chunks).firstOccurrenceImportance: 0.5 }
+    first-phase { expression: nativeRank(chunks) }
+  }
+  rank-profile chunks_native_foi_10 inherits initial {
+    rank-properties { nativeFieldMatch(chunks).firstOccurrenceImportance: 1.0 }
+    first-phase { expression: nativeRank(chunks) }
+  }
+
+  # Generic chunks-only tunable profile: query-weighted blend of chunk-position
+  # signals so different "tricks" can be tried AT QUERY TIME (no redeploy).
+  #   query(w_whole) whole-field bm25(chunks)   query(w_max) best single chunk
+  #   query(w_first) sum of first 3 chunks      query(w_topk) top-k chunks
+  # Default weights => plain bm25(chunks) (matches the bm25 baseline).
+  rank-profile chunks_generic inherits initial {
+    inputs {
+      query(w_whole) double: 1.0
+      query(w_max)   double: 0.0
+      query(w_first) double: 0.0
+      query(w_topk)  double: 0.0
+    }
+    rank-properties { bm25(chunks).k1: 0.9
+                      bm25(chunks).b: 1.0 }
+    function max_chunk()    { expression: reduce(chunk_scores, max) }
+    function first3_chunks(){ expression: chunk_scores{x:"0"} + chunk_scores{x:"1"} + chunk_scores{x:"2"} }
+    first-phase {
+      expression {
+        query(w_whole) * scale(bm25(chunks))
+        + query(w_max)   * scale(max_chunk)
+        + query(w_first) * scale(first3_chunks)
+        + query(w_topk)  * scale(top_k_chunks_score)
+      }
+    }
+    match-features { bm25(chunks) max_chunk first3_chunks top_k_chunks_score chunk_scores }
+  }
+  # ===========================================================================
+  # NEW (additive) — Relative Score Fusion (RSF) variant of v6_linear_hi4.
+  # Purpose: v6 merges three differently-scaled signals with a hand-tuned linear
+  # blend (4.0*nativeRank(fileName) + 0.6*scale(top_k) + 0.4*scale(bm25(ai))).
+  # nativeRank is ~[0,1] but bm25 is unbounded, so v6 leans on scale() + tuned
+  # weights to reconcile scales. RSF instead per-query MIN-MAX normalizes each
+  # signal across the rerank window (Vespa `normalize_linear`) so every signal
+  # lives in [0,1] and the weights mean the same thing on every query.
+  #
+  # Offline experiment (246-Q SEBI eval, raw text, alpha 0, cl1, vs v6-linear):
+  #   v6-linear     hit@10 62.2  hit@40 75.6  MRR 0.444
+  #   RSF 2:1:1     hit@10 65.0  hit@40 76.0  MRR 0.457   (best, FN-tilt)
+  # RRF (rank-only) was tried and LOST at every k (discards magnitude, which is
+  # informative here) — RSF keeps magnitude while fixing the scale mismatch.
+  #
+  # first-phase reuses v6's lexical blend so the SAME candidate pool enters the
+  # global-phase window; global-phase replaces the blend with normalized fusion.
+  # Weights are query inputs (rsf_fn/rsf_ch/rsf_ai) → sweepable without redeploy;
+  # default chunk_limit pinned to 1 (won the v6 cl sweep). Recency intentionally
+  # NOT applied (matches the eval); set query(recency_decay_rate)>0 + multiply by
+  # doc_recency in global-phase if prod recency bias is wanted. Existing profiles
+  # are left untouched.
+  # ===========================================================================
+  rank-profile default_native_dynamic_chunks_file_v6_rsf inherits initial {
+
+    inputs {
+      query(chunk_limit) double: 1   # cl1 won the v6 sweep; override per-request
+      query(rsf_fn) double: 2.0      # RSF weight: nativeRank(fileName)
+      query(rsf_ch) double: 1.5      # RSF weight: top_k_chunks_score (1.0->1.5: live sweep winner)
+      query(rsf_ai) double: 1.0      # RSF weight: bm25(ai_summary)
+    }
+
+    constants {
+      FN_W: 4.0
+      W_TOPK_CHUNKS: 0.60
+      W_AI_SUMMARY: 0.40
+    }
+
+    rank-properties {
+      bm25(fileName).k1: 1.2
+      bm25(fileName).b: 0.0
+      bm25(chunks).k1: 0.9
+      bm25(chunks).b: 0.75
+      bm25(ai_summary).k1: 1.0
+      bm25(ai_summary).b: 0.5
+      elementSimilarity(chunks).output.default: "max((0.70*p + 0.20*o + 0.07*q + 0.03*f) * w)"
+    }
+
+    # v6's lexical blend — only used in first-phase to select the candidate pool.
+    function lexical_score() {
+      expression {
+        FN_W * nativeRank(fileName) +
+        W_TOPK_CHUNKS * scale(top_k_chunks_score) +
+        W_AI_SUMMARY * scale(bm25(ai_summary))
+      }
+    }
+
+    # RSF component signals (referenced by normalize_linear in global-phase).
+    function fn_signal() { expression: nativeRank(fileName) }
+    function ch_signal() { expression: top_k_chunks_score }
+    function ai_signal() { expression: bm25(ai_summary) }
+
+    first-phase {
+      expression: (query(alpha) * vector_score) + ((1 - query(alpha)) * lexical_score)
+    }
+
+    # Relative Score Fusion: min-max normalize each signal across the rerank
+    # window, then weighted sum. Default FN:CH:AI = 2.0:1.5:1.0 (live sweep
+    # winner vs v6-linear: hit@1 +2.4, hit@10 +2.0, MRR +0.017, hit@40 parity).
+    global-phase {
+      expression {
+        query(rsf_fn) * normalize_linear(fn_signal) +
+        query(rsf_ch) * normalize_linear(ch_signal) +
+        query(rsf_ai) * normalize_linear(ai_signal)
+      }
+      # 1000 -> 150: RSF min-max is computed over THIS window; a tighter, cleaner
+      # candidate set sharpens normalization (offline sim: hit@40 76.0/MRR 0.457
+      # at N=150 vs 74.8/0.450 at N=1000). >=150 keeps enough window to rescue
+      # deep content-docs that v6's filename-heavy first-phase buries.
+      rerank-count: 150
+    }
+
+    match-features {
+      vector_score
+      lexical_score
+      nativeRank(fileName)
+      bm25(ai_summary)
+      top_k_chunks_score
+      fn_signal
+      ch_signal
+      ai_signal
+      chunk_scores
+      doc_recency
+    }
+  }
+
+  rank-profile default_native_dynamic_chunks_file_v6_rsf_vec inherits initial {
+
+    inputs {
+      query(chunk_limit) double: 1   # cl1 won the v6 sweep; override per-request
+      query(rsf_fn)  double: 2.0     # RSF weight: nativeRank(fileName)
+      query(rsf_ch)  double: 1.5     # RSF weight: top_k_chunks_score
+      query(rsf_ai)  double: 1.0     # RSF weight: bm25(ai_summary)
+      query(rsf_vec) double: 1.0     # RSF weight: vector closeness (NEW)
+    }
+
+    constants {
+      FN_W: 4.0
+      W_TOPK_CHUNKS: 0.60
+      W_AI_SUMMARY: 0.40
+    }
+
+    rank-properties {
+      bm25(fileName).k1: 1.2
+      bm25(fileName).b: 0.0
+      bm25(chunks).k1: 0.9
+      bm25(chunks).b: 0.75
+      bm25(ai_summary).k1: 1.0
+      bm25(ai_summary).b: 0.5
+      elementSimilarity(chunks).output.default: "max((0.70*p + 0.20*o + 0.07*q + 0.03*f) * w)"
+    }
+
+    # v6's lexical blend — only used in first-phase to select the candidate pool.
+    function lexical_score() {
+      expression {
+        FN_W * nativeRank(fileName) +
+        W_TOPK_CHUNKS * scale(top_k_chunks_score) +
+        W_AI_SUMMARY * scale(bm25(ai_summary))
+      }
+    }
+
+    # RSF component signals (referenced by normalize_linear in global-phase).
+    function fn_signal()  { expression: nativeRank(fileName) }
+    function ch_signal()  { expression: top_k_chunks_score }
+    function ai_signal()  { expression: bm25(ai_summary) }
+    # vector_score is defined in `initial`:
+    #   closeness(field, chunk_embeddings) + closeness(field, image_chunk_embeddings)
+    function vec_signal() { expression: vector_score }
+
+    first-phase {
+      expression: (query(alpha) * vector_score) + ((1 - query(alpha)) * lexical_score)
+    }
+
+    # Relative Score Fusion: per-query min-max normalize each signal across the
+    # rerank window, then weighted sum. Vector now votes independently, so a
+    # doc that only vector found is no longer drowned by the filename term.
+    global-phase {
+      expression {
+        query(rsf_fn)  * normalize_linear(fn_signal) +
+        query(rsf_ch)  * normalize_linear(ch_signal) +
+        query(rsf_ai)  * normalize_linear(ai_signal) +
+        query(rsf_vec) * normalize_linear(vec_signal)
+      }
+      rerank-count: 150
+    }
+
+    match-features {
+      vector_score
+      lexical_score
+      nativeRank(fileName)
+      bm25(ai_summary)
+      top_k_chunks_score
+      fn_signal
+      ch_signal
+      ai_signal
+      vec_signal
+      chunk_scores
+      doc_recency
+    }
+  }
+
+}

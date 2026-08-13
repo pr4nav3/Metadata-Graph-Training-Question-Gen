@@ -1,0 +1,80 @@
+name: metadata-kg-question-gen
+
+services:
+  tei-batch-proxy:
+    image: ${TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-latest}
+    container_name: ${METADATA_KG_TEI_CONTAINER:-metadata-kg-tei-batch-proxy}
+    command:
+      - --model-id
+      - ${METADATA_KG_TEI_MODEL:-intfloat/multilingual-e5-large-instruct}
+      - --hostname
+      - 0.0.0.0
+      - --port
+      - "8080"
+    volumes:
+      - tei-data:/data
+    networks:
+      - metadata-kg
+    restart: always
+
+  vespa:
+    image: ${VESPA_IMAGE:-vespaengine/vespa}
+    container_name: ${METADATA_KG_VESPA_CONTAINER:-metadata-kg-vespa}
+    user: "1000:1000"
+    hostname: vespa-container
+    depends_on:
+      - tei-batch-proxy
+    deploy:
+      resources:
+        limits:
+          memory: ${METADATA_KG_VESPA_MEMORY_LIMIT:-8G}
+    ulimits:
+      nproc: 409600
+    ports:
+      - "${METADATA_KG_VESPA_FEED_PORT:-18080}:8080"
+      - "${METADATA_KG_VESPA_QUERY_PORT:-18081}:8081"
+      - "${METADATA_KG_VESPA_CONFIG_PORT:-19072}:19071"
+    volumes:
+      - ../server/vespa-data:/opt/vespa/var
+      - ../server/vespa-logs:/opt/vespa/logs
+    environment:
+      - VESPA_CONFIGSERVER_JVMARGS=-Xms512m -Xmx4g -XX:+UseG1GC -XX:G1HeapRegionSize=32M
+      - VESPA_CONFIGPROXY_JVMARGS=-Xms256m -Xmx2g -XX:+UseG1GC
+    networks:
+      - metadata-kg
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "6"
+
+  xyne-db:
+    image: postgres:15-alpine
+    container_name: ${METADATA_KG_POSTGRES_CONTAINER:-metadata-kg-xyne-db}
+    environment:
+      POSTGRES_USER: xyne
+      POSTGRES_PASSWORD: xyne
+      POSTGRES_DB: xyne
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - ../server/xyne-data:/var/lib/postgresql/data
+    ports:
+      - "${METADATA_KG_POSTGRES_PORT:-15432}:5432"
+    networks:
+      - metadata-kg
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xyne -d xyne"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  metadata-kg:
+    driver: bridge
+
+volumes:
+  tei-data:
+    driver: local

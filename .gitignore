@@ -1,0 +1,39 @@
+# Secrets
+server/.env
+
+# Downloaded data and graph artifacts
+SEBI-14K-share/
+scripts/metadata-graph/graph/
+scripts/metadata-graph/graph_v2/
+scripts/metadata-graph/output_v2/
+
+# Regenerated caches and local service data
+scripts/metadata-graph/output/hydration/
+server/vespa-data/
+server/vespa-logs/
+server/xyne-data/
+
+# Generated runs and transient pipeline state. Keep only the durable coverage,
+# frontier, and accepted-memory state needed to continue from current coverage.
+scripts/metadata-graph/output/opencode_kimi/*
+!scripts/metadata-graph/output/opencode_kimi/coverage.sqlite
+!scripts/metadata-graph/output/opencode_kimi/frontier_ledger.jsonl
+!scripts/metadata-graph/output/opencode_kimi/frontier_ledger.md
+!scripts/metadata-graph/output/opencode_kimi/previous_explored_regions.md
+!scripts/metadata-graph/output/opencode_kimi/memory/
+!scripts/metadata-graph/output/opencode_kimi/memory/**
+
+# Only the metadata-pipeline reference/export datasets belong in this repo.
+questions/*
+!questions/Kimi+Opencode_Questions.csv
+!questions/SEBI_questions_answers.csv
+!questions/gold_multi_doc_questions_codex_verified_20260720.jsonl
+
+# The eval-generation pipeline is maintained separately.
+scripts/eval-question-gen/
+
+# Python/editor noise
+__pycache__/
+*.py[cod]
+.DS_Store
+.venv/
